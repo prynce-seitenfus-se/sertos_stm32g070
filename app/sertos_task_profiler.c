@@ -8,6 +8,7 @@
 #include "profiler.h"
 #include "sertos_port.h"
 #include "sertos_scheduler.h"
+#include "stream.h"
 #include "usart.h"
 #include "stm32g0xx_hal_uart_ex.h"
 
@@ -18,15 +19,102 @@
 #define PROFILER_DUMP_COMMAND         "prof-dump"
 #define PROFILER_DUMP_COMMAND_LENGTH  (sizeof(PROFILER_DUMP_COMMAND) - 1U)
 
+/* Forward declarations of internal static functions */
+static bool profiler_command_matches(const uint8_t* buffer, uint16_t size);
+static bool profiler_uart_send_chunk(uint16_t length);
+static size_t profiler_uart_stream_write(void* context, const uint8_t* buffer, size_t size);
+static void profiler_uart_stream_flush(void* context);
+static size_t profiler_uart_stream_read(void* context, uint8_t* buffer, size_t size);
+static bool profiler_stream_append_line(const Stream* stream, const char* line, size_t length);
+static bool profiler_stream_append_char(const Stream* stream, char value);
+static bool profiler_stream_append_uint32(const Stream* stream, uint32_t value);
+static bool profiler_stream_append_address(const Stream* stream, uintptr_t address);
+static bool profiler_uart_dump_events(const Stream* stream);
+
+/* Static members and state variables */
 static profiler_event_t s_profiler_events[PROFILER_EVENT_CAPACITY];
 static uint8_t s_profiler_command_buffer[PROFILER_COMMAND_BUFFER_SIZE]
     __attribute__((aligned(32)));
 static uint8_t s_profiler_tx_buffer[PROFILER_TX_BUFFER_SIZE]
     __attribute__((aligned(32)));
+
+static Stream s_profiler_stream;
+static size_t s_profiler_tx_buffered = 0U;
+static volatile size_t s_profiler_rx_available = 0U;
+static size_t s_profiler_rx_read_offset = 0U;
+
 static volatile bool s_profiler_dump_requested = false;
 static volatile bool s_profiler_tx_complete = false;
 static volatile bool s_profiler_tx_error = false;
 static volatile bool s_profiler_uart_error = false;
+
+/* ========================================================================== */
+/* Public API Implementations                                                 */
+/* ========================================================================== */
+
+void sertos_task_profiler_init(void)
+{
+    profiler_config_t profiler_config;
+
+    /* Initialize bidirectional stream connected to USART2 */
+    s_profiler_stream = stream_init(&huart2,
+                                    profiler_uart_stream_write,
+                                    profiler_uart_stream_read,
+                                    profiler_uart_stream_flush);
+
+    /* TIM1 drives the profiler timestamp counter (prescaler 0), so its tick
+     * rate equals the APB1 timer clock. With APB1 prescaler = 1 the timer
+     * clock equals PCLK1, which is the correct frequency for dump analysis. */
+    profiler_config.frequency = HAL_RCC_GetPCLK1Freq();
+    profiler_config.buffer = s_profiler_events;
+    profiler_config.capacity = PROFILER_EVENT_CAPACITY;
+    profiler_init(&profiler_config);
+    profiler_start();
+}
+
+void sertos_task_profiler(void* param)
+{
+    (void)param;
+
+    while (1) {
+        bool dump_requested;
+        uint32_t critical_state;
+
+        if (s_profiler_uart_error) {
+            Error_Handler();
+        }
+
+        critical_state = sertos_port_enter_critical();
+        dump_requested = s_profiler_dump_requested;
+        s_profiler_dump_requested = false;
+        sertos_port_exit_critical(critical_state);
+
+        if (dump_requested && !profiler_uart_dump_events(&s_profiler_stream)) {
+            Error_Handler();
+        }
+
+        (void)sertos_scheduler_delay(10U);
+    }
+}
+
+bool sertos_task_profiler_start_uart_receive(void)
+{
+    HAL_StatusTypeDef status;
+
+    status = HAL_UARTEx_ReceiveToIdle_DMA(&huart2,
+                                          s_profiler_command_buffer,
+                                          (uint16_t)sizeof(s_profiler_command_buffer));
+    if (status == HAL_OK) {
+        __HAL_DMA_DISABLE_IT(huart2.hdmarx, DMA_IT_HT);
+        return true;
+    }
+
+    return false;
+}
+
+/* ========================================================================== */
+/* Static Helper Functions                                                    */
+/* ========================================================================== */
 
 static bool profiler_command_matches(const uint8_t* buffer, uint16_t size)
 {
@@ -47,21 +135,6 @@ static bool profiler_command_matches(const uint8_t* buffer, uint16_t size)
 
     return ((size_t)(last - first) == PROFILER_DUMP_COMMAND_LENGTH) &&
            (memcmp(&buffer[first], PROFILER_DUMP_COMMAND, PROFILER_DUMP_COMMAND_LENGTH) == 0);
-}
-
-bool sertos_task_profiler_start_uart_receive(void)
-{
-    HAL_StatusTypeDef status;
-
-    status = HAL_UARTEx_ReceiveToIdle_DMA(&huart2,
-                                          s_profiler_command_buffer,
-                                          (uint16_t)sizeof(s_profiler_command_buffer));
-    if (status == HAL_OK) {
-        __HAL_DMA_DISABLE_IT(huart2.hdmarx, DMA_IT_HT);
-        return true;
-    }
-
-    return false;
 }
 
 static bool profiler_uart_send_chunk(uint16_t length)
@@ -93,32 +166,81 @@ static bool profiler_uart_send_chunk(uint16_t length)
     return !s_profiler_tx_error;
 }
 
-static bool profiler_uart_append_line(const char* line, size_t length, size_t* buffered)
+static size_t profiler_uart_stream_write(void* context, const uint8_t* buffer, size_t size)
 {
-    if ((line == NULL) || (buffered == NULL) ||
-        (*buffered > sizeof(s_profiler_tx_buffer)) ||
-        (length > sizeof(s_profiler_tx_buffer))) {
+    UART_HandleTypeDef* uart = (UART_HandleTypeDef*)context;
+    size_t written = 0U;
+
+    if ((uart == NULL) || (buffer == NULL) || (size == 0U)) {
+        return 0U;
+    }
+
+    while (written < size) {
+        size_t available = sizeof(s_profiler_tx_buffer) - s_profiler_tx_buffered;
+        size_t remaining = size - written;
+        size_t to_copy = (remaining < available) ? remaining : available;
+
+        (void)memcpy(&s_profiler_tx_buffer[s_profiler_tx_buffered], &buffer[written], to_copy);
+        s_profiler_tx_buffered += to_copy;
+        written += to_copy;
+
+        if (s_profiler_tx_buffered >= sizeof(s_profiler_tx_buffer)) {
+            if (!profiler_uart_send_chunk((uint16_t)s_profiler_tx_buffered)) {
+                break;
+            }
+            s_profiler_tx_buffered = 0U;
+        }
+    }
+
+    return written;
+}
+
+static void profiler_uart_stream_flush(void* context)
+{
+    (void)context;
+    if (s_profiler_tx_buffered > 0U) {
+        (void)profiler_uart_send_chunk((uint16_t)s_profiler_tx_buffered);
+        s_profiler_tx_buffered = 0U;
+    }
+}
+
+static size_t profiler_uart_stream_read(void* context, uint8_t* buffer, size_t size)
+{
+    (void)context;
+    size_t read_bytes = 0U;
+
+    if ((buffer == NULL) || (size == 0U) || (s_profiler_rx_available == 0U)) {
+        return 0U;
+    }
+
+    size_t remaining = s_profiler_rx_available - s_profiler_rx_read_offset;
+    read_bytes = (size < remaining) ? size : remaining;
+
+    (void)memcpy(buffer, &s_profiler_command_buffer[s_profiler_rx_read_offset], read_bytes);
+    s_profiler_rx_read_offset += read_bytes;
+
+    if (s_profiler_rx_read_offset >= s_profiler_rx_available) {
+        s_profiler_rx_available = 0U;
+        s_profiler_rx_read_offset = 0U;
+    }
+
+    return read_bytes;
+}
+
+static bool profiler_stream_append_line(const Stream* stream, const char* line, size_t length)
+{
+    if ((stream == NULL) || (line == NULL)) {
         return false;
     }
-
-    if (*buffered > (sizeof(s_profiler_tx_buffer) - length)) {
-        if (!profiler_uart_send_chunk((uint16_t)*buffered)) {
-            return false;
-        }
-        *buffered = 0U;
-    }
-
-    (void)memcpy(&s_profiler_tx_buffer[*buffered], line, length);
-    *buffered += length;
-    return true;
+    return (stream_write(stream, (const uint8_t*)line, length) == length);
 }
 
-static bool profiler_uart_append_char(char value, size_t* buffered)
+static bool profiler_stream_append_char(const Stream* stream, char value)
 {
-    return profiler_uart_append_line(&value, 1U, buffered);
+    return profiler_stream_append_line(stream, &value, 1U);
 }
 
-static bool profiler_uart_append_uint32(uint32_t value, size_t* buffered)
+static bool profiler_stream_append_uint32(const Stream* stream, uint32_t value)
 {
     char digits[10];
     size_t count = 0U;
@@ -131,7 +253,7 @@ static bool profiler_uart_append_uint32(uint32_t value, size_t* buffered)
 
     while (count > 0U) {
         count--;
-        if (!profiler_uart_append_char(digits[count], buffered)) {
+        if (!profiler_stream_append_char(stream, digits[count])) {
             return false;
         }
     }
@@ -139,12 +261,12 @@ static bool profiler_uart_append_uint32(uint32_t value, size_t* buffered)
     return true;
 }
 
-static bool profiler_uart_append_address(uintptr_t address, size_t* buffered)
+static bool profiler_stream_append_address(const Stream* stream, uintptr_t address)
 {
     static const char hexadecimal_digits[] = "0123456789abcdef";
     size_t digits = sizeof(uintptr_t) * 2U;
 
-    if (!profiler_uart_append_line("0x", 2U, buffered)) {
+    if (!profiler_stream_append_line(stream, "0x", 2U)) {
         return false;
     }
 
@@ -153,7 +275,7 @@ static bool profiler_uart_append_address(uintptr_t address, size_t* buffered)
 
         digits--;
         digit = (uint8_t)((address >> (digits * 4U)) & 0x0FU);
-        if (!profiler_uart_append_char(hexadecimal_digits[digit], buffered)) {
+        if (!profiler_stream_append_char(stream, hexadecimal_digits[digit])) {
             return false;
         }
     }
@@ -161,7 +283,7 @@ static bool profiler_uart_append_address(uintptr_t address, size_t* buffered)
     return true;
 }
 
-static bool profiler_uart_dump_events(void)
+static bool profiler_uart_dump_events(const Stream* stream)
 {
     static const char dump_prefix[] = "# PROF-DUMP v1 events=";
     static const char frequency_field[] = " frequency_hz=";
@@ -173,8 +295,11 @@ static bool profiler_uart_dump_events(void)
     uint32_t capacity;
     uint32_t overflowed;
     uint32_t critical_state;
-    size_t buffered = 0U;
-    bool success = true;
+    bool success;
+
+    if (stream == NULL) {
+        return false;
+    }
 
     profiler_stop();
     overflowed = profiler_overflowed() ? 1U : 0U;
@@ -183,13 +308,13 @@ static bool profiler_uart_dump_events(void)
         event_count++;
     }
 
-    success = profiler_uart_append_line(dump_prefix, sizeof(dump_prefix) - 1U, &buffered) &&
-              profiler_uart_append_uint32(event_count, &buffered) &&
-              profiler_uart_append_line(frequency_field, sizeof(frequency_field) - 1U, &buffered) &&
-              profiler_uart_append_uint32(profiler_frequency(), &buffered) &&
-              profiler_uart_append_line(overflow_field, sizeof(overflow_field) - 1U, &buffered) &&
-              profiler_uart_append_uint32(overflowed, &buffered) &&
-              profiler_uart_append_line(csv_header, sizeof(csv_header) - 1U, &buffered);
+    success = profiler_stream_append_line(stream, dump_prefix, sizeof(dump_prefix) - 1U) &&
+              profiler_stream_append_uint32(stream, event_count) &&
+              profiler_stream_append_line(stream, frequency_field, sizeof(frequency_field) - 1U) &&
+              profiler_stream_append_uint32(stream, profiler_frequency()) &&
+              profiler_stream_append_line(stream, overflow_field, sizeof(overflow_field) - 1U) &&
+              profiler_stream_append_uint32(stream, overflowed) &&
+              profiler_stream_append_line(stream, csv_header, sizeof(csv_header) - 1U);
 
     for (event_index = 0U; (event_index < event_count) && success; event_index++) {
         if (!profiler_read_event(event_index, &event)) {
@@ -197,36 +322,34 @@ static bool profiler_uart_dump_events(void)
             break;
         }
 
-        success = profiler_uart_append_uint32(event_index, &buffered) &&
-                  profiler_uart_append_char(',', &buffered) &&
-                  profiler_uart_append_uint32(event.timestamp, &buffered) &&
-                  profiler_uart_append_char(',', &buffered);
+        success = profiler_stream_append_uint32(stream, event_index) &&
+                  profiler_stream_append_char(stream, ',') &&
+                  profiler_stream_append_uint32(stream, event.timestamp) &&
+                  profiler_stream_append_char(stream, ',');
         if (success) {
             if (event.event == PROFILER_EVENT_ENTER) {
-                success = profiler_uart_append_line("ENTER", 5U, &buffered);
+                success = profiler_stream_append_line(stream, "ENTER", 5U);
             } else if (event.event == PROFILER_EVENT_EXIT) {
-                success = profiler_uart_append_line("EXIT", 4U, &buffered);
+                success = profiler_stream_append_line(stream, "EXIT", 4U);
             } else {
-                success = profiler_uart_append_line("UNKNOWN", 7U, &buffered);
+                success = profiler_stream_append_line(stream, "UNKNOWN", 7U);
             }
         }
 
         if (success) {
-            success = profiler_uart_append_char(',', &buffered) &&
-                      profiler_uart_append_address((uintptr_t)event.this, &buffered) &&
-                      profiler_uart_append_char(',', &buffered) &&
-                      profiler_uart_append_address((uintptr_t)event.call, &buffered) &&
-                      profiler_uart_append_line("\r\n", 2U, &buffered);
+            success = profiler_stream_append_char(stream, ',') &&
+                      profiler_stream_append_address(stream, (uintptr_t)event.this) &&
+                      profiler_stream_append_char(stream, ',') &&
+                      profiler_stream_append_address(stream, (uintptr_t)event.call) &&
+                      profiler_stream_append_line(stream, "\r\n", 2U);
         }
     }
 
     if (success) {
-        success = profiler_uart_append_line("# END\r\n", 7U, &buffered);
+        success = profiler_stream_append_line(stream, "# END\r\n", 7U);
     }
 
-    if (success) {
-        success = profiler_uart_send_chunk((uint16_t)buffered);
-    }
+    stream_flush(stream);
 
     critical_state = sertos_port_enter_critical();
     profiler_start();
@@ -235,41 +358,9 @@ static bool profiler_uart_dump_events(void)
     return success;
 }
 
-void sertos_task_profiler_init(void)
-{
-    profiler_config_t profiler_config;
-
-    profiler_config.frequency = SERTOS_CONFIG_TICK_RATE_HZ;
-    profiler_config.buffer = s_profiler_events;
-    profiler_config.capacity = PROFILER_EVENT_CAPACITY;
-    profiler_init(&profiler_config);
-    profiler_start();
-}
-
-void sertos_task_profiler(void* param)
-{
-    (void)param;
-
-    while (1) {
-        bool dump_requested;
-        uint32_t critical_state;
-
-        if (s_profiler_uart_error) {
-            Error_Handler();
-        }
-
-        critical_state = sertos_port_enter_critical();
-        dump_requested = s_profiler_dump_requested;
-        s_profiler_dump_requested = false;
-        sertos_port_exit_critical(critical_state);
-
-        if (dump_requested && !profiler_uart_dump_events()) {
-            Error_Handler();
-        }
-
-        (void)sertos_scheduler_delay(10U);
-    }
-}
+/* ========================================================================== */
+/* HAL Callbacks                                                              */
+/* ========================================================================== */
 
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef* uart, uint16_t size)
 {
@@ -281,7 +372,13 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef* uart, uint16_t size)
 
     event_type = HAL_UARTEx_GetRxEventType(uart);
     if ((event_type == HAL_UART_RXEVENT_IDLE) || (event_type == HAL_UART_RXEVENT_TC)) {
-        if (profiler_command_matches(s_profiler_command_buffer, size)) {
+        uint8_t cmd_buffer[PROFILER_COMMAND_BUFFER_SIZE];
+        s_profiler_rx_available = (size <= sizeof(s_profiler_command_buffer)) ?
+                                  (size_t)size : sizeof(s_profiler_command_buffer);
+        s_profiler_rx_read_offset = 0U;
+
+        size_t bytes_read = stream_read(&s_profiler_stream, cmd_buffer, sizeof(cmd_buffer));
+        if (profiler_command_matches(cmd_buffer, (uint16_t)bytes_read)) {
             s_profiler_dump_requested = true;
         }
 

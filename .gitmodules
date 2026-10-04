@@ -1,0 +1,6 @@
+[submodule "modules/profiler"]
+	path = modules/profiler
+	url = https://github.com/Prynce-Seitenfus/profiler.git
+[submodule "modules/stream"]
+	path = modules/stream
+	url = https://github.com/Prynce-Seitenfus/stream.git

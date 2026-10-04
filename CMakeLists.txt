@@ -41,7 +41,8 @@ add_subdirectory(cmake/stm32cubemx)
 set(SERTOS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../sertos" CACHE PATH "Path to the SertOS root directory")
 set(SERTOS_LIB_NAME "libsertos_cortex_m0plus.a")
 set(SERTOS_LIB_PATH "${SERTOS_DIR}/lib/arm/${SERTOS_LIB_NAME}" CACHE FILEPATH "Path to the pre-compiled SertOS Cortex-M0+ library")
-set(PROFILER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../sertos_stm32h533/modules/profiler" CACHE PATH "Path to the profiler module")
+set(PROFILER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/modules/profiler" CACHE PATH "Path to the profiler module")
+set(STREAM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/modules/stream" CACHE PATH "Path to the stream module")
 
 if(NOT EXISTS "${SERTOS_LIB_PATH}")
     message(FATAL_ERROR "Pre-compiled SertOS library not found at '${SERTOS_LIB_PATH}'. Build the Cortex-M0+ target in '${SERTOS_DIR}' first.")
@@ -49,6 +50,10 @@ endif()
 
 if(NOT EXISTS "${PROFILER_DIR}/profiler.c")
     message(FATAL_ERROR "Profiler module not found at '${PROFILER_DIR}'. Set PROFILER_DIR to an initialized profiler checkout.")
+endif()
+
+if(NOT EXISTS "${STREAM_DIR}/stream.c")
+    message(FATAL_ERROR "Stream module not found at '${STREAM_DIR}'. Initialize project submodules with 'git submodule update --init --recursive'.")
 endif()
 
 # Link directories setup
@@ -65,12 +70,14 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/app/sertos_task_consumer.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/app/sertos_task_profiler.c"
     "${PROFILER_DIR}/profiler.c"
+    "${STREAM_DIR}/stream.c"
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/app"
     "${PROFILER_DIR}"
+    "${STREAM_DIR}"
     "${SERTOS_DIR}/inc"
     "${SERTOS_DIR}/port"
     "${SERTOS_DIR}/modules/ring_buffer"
@@ -94,4 +101,16 @@ list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
 target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
     "${SERTOS_LIB_PATH}"
+)
+
+# Keep profiler callbacks out of instrumentation to prevent recursive hook calls.
+target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
+    "$<$<COMPILE_LANGUAGE:C>:-finstrument-functions>"
+    "$<$<COMPILE_LANGUAGE:C>:-fopt-info-inline-missed>"
+)
+set_source_files_properties(
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/profiler_port.c"
+    "${PROFILER_DIR}/profiler.c"
+    "${STREAM_DIR}/stream.c"
+    PROPERTIES COMPILE_OPTIONS "-fno-instrument-functions"
 )

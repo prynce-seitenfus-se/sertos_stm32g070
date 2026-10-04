@@ -1,27 +1,34 @@
 #include "profiler_port.h"
-#include "sertos_port.h"
-#include "sertos_scheduler.h"
-
-uint32_t __atomic_fetch_add_4(volatile void* pointer, uint32_t value, int memory_order)
-{
-    volatile uint32_t* target = (volatile uint32_t*)pointer;
-    uint32_t critical_state;
-    uint32_t previous;
-
-    (void)memory_order;
-    critical_state = sertos_port_enter_critical();
-    previous = *target;
-    *target = previous + value;
-    sertos_port_exit_critical(critical_state);
-
-    return previous;
-}
+#include "tim.h"
 
 void profiler_port_init(void)
 {
+	__HAL_TIM_SET_COUNTER(&htim1, 0U);
+	__HAL_TIM_SET_COUNTER(&htim3, 0U);
+
+	if ( HAL_TIM_Base_Start(&htim3) != HAL_OK ) { // slave 1st
+        Error_Handler();        
+	}
+	else if ( HAL_TIM_Base_Start(&htim1) != HAL_OK ) { // then master
+		Error_Handler();
+	}
+	else {
+        // Both timers running: TIM1 = low 16 bits, TIM3 = high 16 bits
+	}
 }
 
 uint32_t profiler_port_ticks(void)
 {
-    return (uint32_t)sertos_scheduler_get_tick_count();
+	uint32_t hi = __HAL_TIM_GET_COUNTER(&htim3);
+	uint32_t lo = __HAL_TIM_GET_COUNTER(&htim1); // warning: interrupt may occur
+	const uint32_t hi2 = __HAL_TIM_GET_COUNTER(&htim3);
+
+	if ( hi != hi2 )
+	{
+		/* TIM1 wrapped between the reads: re-read the low half so it belongs to hi2 */
+		lo = __HAL_TIM_GET_COUNTER(&htim1);
+		hi = hi2;
+	}
+
+	return ( hi << 16U ) | ( lo & 0xFFFFU );
 }

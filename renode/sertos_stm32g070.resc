@@ -1,0 +1,23 @@
+:name: sertos_stm32g070
+:description: Run the SerTOS STM32G070 demo (Cortex-M0+) in Renode.
+
+# Build the virtual machine from Renode's bundled STM32G0 platform description.
+mach create "sertos_stm32g070"
+machine LoadPlatformDescription @platforms/cpus/stm32g0.repl
+
+# Open a terminal window attached to USART2 (PA2/PA3, 115200-8-N-1).
+# This is where printf() / the SerTOS producer-consumer demo output appears.
+showAnalyzer sysbus.usart2
+
+# Load the firmware. Path is resolved relative to this .resc file via $ORIGIN,
+# so you can launch it from any working directory.
+$bin ?= $ORIGIN/../build/Debug/sertos_stm32g070.elf
+sysbus LoadELF $bin
+
+# Optional: log UART traffic to a file next to the script.
+# logLevel 3 sysbus.usart2
+# emulation CreateUartPtyTerminal "term" "sysbus.usart2"
+
+# Jump straight into execution. Use `pause` / `start` from the Renode monitor
+# to control the simulation after it is loaded.
+start
