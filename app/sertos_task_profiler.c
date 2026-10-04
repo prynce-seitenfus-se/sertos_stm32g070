@@ -23,10 +23,10 @@ static ProfilerStackFrame s_profiler_stack[PROFILER_STACK_DEPTH];
 static uint8_t s_profiler_tx_buffer[PROFILER_TX_BUFFER_SIZE] __attribute__((aligned(32)));
 static uint8_t s_profiler_rx_buffer[PROFILER_RX_BUFFER_SIZE] __attribute__((aligned(32)));
 
-static bool profiler_command_matches(const uint8_t* buffer, size_t length);
-static bool profiler_dump_metrics(void);
-static uint32_t profiler_tick_ms(void);
-static void profiler_yield_ms(uint32_t milliseconds);
+static __attribute__((no_instrument_function)) bool profiler_command_matches(const uint8_t* buffer, size_t length);
+static __attribute__((no_instrument_function)) bool profiler_dump_metrics(void);
+static __attribute__((no_instrument_function)) uint32_t profiler_tick_ms(void);
+static __attribute__((no_instrument_function)) void profiler_yield_ms(uint32_t milliseconds);
 
 void sertos_task_profiler_init(void)
 {

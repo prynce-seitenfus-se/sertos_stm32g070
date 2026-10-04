@@ -48,6 +48,31 @@ cmake --preset Debug
 cmake --build --preset Debug
 ```
 
+On Windows, `build.bat` supports the `Debug`, `Release`, and `Renode` presets
+(`Debug` is the default):
+
+```powershell
+.\build.bat
+.\build.bat Release
+.\build.bat Renode
+.\build.bat -i
+.\build.bat Release -c
+.\build.bat Renode -i
+.\build.bat -c -i
+```
+
+`-c` cleans the selected preset's build outputs before building. `-i` builds
+and links the instrumented Cortex-M0+ SerTOS library (instrumentation is
+limited to the SerTOS API translation units under `src/`) and enables
+`-finstrument-functions` for `app/sertos_demo_queue.c` and the producer,
+consumer, and profiler task files; it is off by default. Instrumented builds
+also use 1024-byte producer/consumer stacks to accommodate profiler hook stack
+usage. The profiler port implementation (`app/profiler_port.c`) remains
+uninstrumented to prevent recursive profiler callbacks.
+Internal scheduler and dependency helpers are marked
+`__attribute__((no_instrument_function))`, keeping the dump focused on
+application-used SerTOS APIs.
+
 Use the `Release` preset for an optimized build. Build output is placed under
 `build/<Config>/sertos_stm32g070.elf`.
 

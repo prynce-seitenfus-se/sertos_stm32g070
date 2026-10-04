@@ -27,6 +27,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 # Core project settings
 project(${CMAKE_PROJECT_NAME})
 message("Build type: " ${CMAKE_BUILD_TYPE})
+option(SERTOS_APP_INSTRUMENTED "Instrument selected application files" OFF)
 
 # Enable CMake support for ASM and C languages
 enable_language(C ASM)
@@ -39,8 +40,24 @@ add_subdirectory(cmake/stm32cubemx)
 
 # Configure paths to the shared SertOS and profiler repositories
 set(SERTOS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../sertos" CACHE PATH "Path to the SertOS root directory")
-set(SERTOS_LIB_NAME "libsertos_cortex_m0plus.a")
-set(SERTOS_LIB_PATH "${SERTOS_DIR}/lib/arm/${SERTOS_LIB_NAME}" CACHE FILEPATH "Path to the pre-compiled SertOS Cortex-M0+ library")
+if(SERTOS_APP_INSTRUMENTED)
+    set(SERTOS_LIB_NAME "libsertos_cortex_m0plus_instrumented.a")
+else()
+    set(SERTOS_LIB_NAME "libsertos_cortex_m0plus.a")
+endif()
+set(_SERTOS_LIB_PATH_DEFAULT "${SERTOS_DIR}/lib/arm/${SERTOS_LIB_NAME}")
+set(_SERTOS_LIB_PATH_NORMAL "${SERTOS_DIR}/lib/arm/libsertos_cortex_m0plus.a")
+set(_SERTOS_LIB_PATH_INSTRUMENTED "${SERTOS_DIR}/lib/arm/libsertos_cortex_m0plus_instrumented.a")
+if(NOT DEFINED SERTOS_LIB_PATH OR
+   "${SERTOS_LIB_PATH}" STREQUAL "${_SERTOS_LIB_PATH_NORMAL}" OR
+   "${SERTOS_LIB_PATH}" STREQUAL "${_SERTOS_LIB_PATH_INSTRUMENTED}" OR
+   (DEFINED SERTOS_LIB_PATH_DEFAULT AND
+    "${SERTOS_LIB_PATH}" STREQUAL "${SERTOS_LIB_PATH_DEFAULT}"))
+    set(SERTOS_LIB_PATH "${_SERTOS_LIB_PATH_DEFAULT}" CACHE FILEPATH
+        "Path to the pre-compiled SertOS Cortex-M0+ library" FORCE)
+endif()
+set(SERTOS_LIB_PATH_DEFAULT "${_SERTOS_LIB_PATH_DEFAULT}" CACHE INTERNAL
+    "Default SertOS library path for the selected instrumentation mode" FORCE)
 set(PROFILER_DEFAULT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/modules/profiler")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../profiler/CMakeLists.txt")
     set(PROFILER_DEFAULT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../profiler")
@@ -117,11 +134,23 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     "${SERTOS_LIB_PATH}"
 )
 
-# Keep profiler callbacks out of instrumentation to prevent recursive hook calls.
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
-    "$<$<COMPILE_LANGUAGE:C>:-finstrument-functions>"
     "$<$<COMPILE_LANGUAGE:C>:-fopt-info-inline-missed>"
 )
+
+# Instrument application files for function call tracing.
+if(SERTOS_APP_INSTRUMENTED)
+    target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE SERTOS_APP_INSTRUMENTED)
+    set_source_files_properties(
+        "${CMAKE_CURRENT_SOURCE_DIR}/app/sertos_demo_queue.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/app/sertos_task_producer.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/app/sertos_task_consumer.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/app/sertos_task_profiler.c"
+        PROPERTIES COMPILE_OPTIONS "-finstrument-functions"
+    )
+endif()
+
+# Keep profiler callbacks out of instrumentation to prevent recursive hook calls.
 set_source_files_properties(
     "${CMAKE_CURRENT_SOURCE_DIR}/app/profiler_port.c"
     PROPERTIES COMPILE_OPTIONS "-fno-instrument-functions"

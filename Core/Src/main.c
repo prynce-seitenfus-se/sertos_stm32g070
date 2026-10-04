@@ -42,7 +42,11 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#if defined(SERTOS_APP_INSTRUMENTED)
+#define SERTOS_DEMO_STACK_BYTES (1024U)
+#else
 #define SERTOS_DEMO_STACK_BYTES (256U)
+#endif
 #define SERTOS_PROF_STACK_BYTES (2048U)
 /* USER CODE END PD */
 
