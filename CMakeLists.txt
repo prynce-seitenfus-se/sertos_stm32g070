@@ -41,8 +41,19 @@ add_subdirectory(cmake/stm32cubemx)
 set(SERTOS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../sertos" CACHE PATH "Path to the SertOS root directory")
 set(SERTOS_LIB_NAME "libsertos_cortex_m0plus.a")
 set(SERTOS_LIB_PATH "${SERTOS_DIR}/lib/arm/${SERTOS_LIB_NAME}" CACHE FILEPATH "Path to the pre-compiled SertOS Cortex-M0+ library")
-set(PROFILER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/modules/profiler" CACHE PATH "Path to the profiler module")
-set(STREAM_DIR "${CMAKE_CURRENT_SOURCE_DIR}/modules/stream" CACHE PATH "Path to the stream module")
+set(PROFILER_DEFAULT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/modules/profiler")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../profiler/CMakeLists.txt")
+    set(PROFILER_DEFAULT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../profiler")
+endif()
+set(STREAM_DEFAULT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/modules/stream")
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../stream/stream.c")
+    set(STREAM_DEFAULT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../stream")
+endif()
+set(PROFILER_DIR "${PROFILER_DEFAULT_DIR}" CACHE PATH "Path to the profiler module")
+set(STREAM_DIR "${STREAM_DEFAULT_DIR}" CACHE PATH "Path to the stream module")
+set(HASHMAP_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../hashmap" CACHE PATH "Path to the hashmap module")
+set(PROFILER_PORT "2x16bit" CACHE STRING "Profiler port backend")
+set(PROFILER_TRANSPORT "uart_stm32_hal_dma" CACHE STRING "Profiler transport backend")
 
 if(NOT EXISTS "${SERTOS_LIB_PATH}")
     message(FATAL_ERROR "Pre-compiled SertOS library not found at '${SERTOS_LIB_PATH}'. Build the Cortex-M0+ target in '${SERTOS_DIR}' first.")
@@ -51,10 +62,16 @@ endif()
 if(NOT EXISTS "${PROFILER_DIR}/profiler.c")
     message(FATAL_ERROR "Profiler module not found at '${PROFILER_DIR}'. Set PROFILER_DIR to an initialized profiler checkout.")
 endif()
+if(NOT EXISTS "${PROFILER_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR "Profiler CMake target not found at '${PROFILER_DIR}'. Update the profiler module to the transport-port revision.")
+endif()
 
 if(NOT EXISTS "${STREAM_DIR}/stream.c")
     message(FATAL_ERROR "Stream module not found at '${STREAM_DIR}'. Initialize project submodules with 'git submodule update --init --recursive'.")
 endif()
+
+add_subdirectory("${PROFILER_DIR}" profiler_build)
+target_link_libraries(profiler PRIVATE stm32cubemx)
 
 # Link directories setup
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
@@ -69,15 +86,11 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/app/sertos_task_producer.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/app/sertos_task_consumer.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/app/sertos_task_profiler.c"
-    "${PROFILER_DIR}/profiler.c"
-    "${STREAM_DIR}/stream.c"
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/app"
-    "${PROFILER_DIR}"
-    "${STREAM_DIR}"
     "${SERTOS_DIR}/inc"
     "${SERTOS_DIR}/port"
     "${SERTOS_DIR}/modules/ring_buffer"
@@ -90,9 +103,9 @@ target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 )
 
 # Add project symbols (macros)
-target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user defined symbols
-)
+if(PROFILER_PORT STREQUAL "16bit_it")
+    target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE PROFILER_PORT_USE_16BIT_IT)
+endif()
 
 # Remove wrong libob.a library dependency when using cpp files
 list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
@@ -100,6 +113,7 @@ list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
 # Add linked libraries
 target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
+    profiler
     "${SERTOS_LIB_PATH}"
 )
 
@@ -110,7 +124,5 @@ target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
 )
 set_source_files_properties(
     "${CMAKE_CURRENT_SOURCE_DIR}/app/profiler_port.c"
-    "${PROFILER_DIR}/profiler.c"
-    "${STREAM_DIR}/stream.c"
     PROPERTIES COMPILE_OPTIONS "-fno-instrument-functions"
 )

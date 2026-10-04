@@ -160,6 +160,16 @@ void USART2_IRQHandler(void)
   /* USER CODE END USART2_IRQn 1 */
 }
 
+extern TIM_HandleTypeDef htim1;
+
+/**
+  * @brief This function handles TIM1 Break, Update, Trigger and Commutation Interrupts.
+  */
+void TIM1_BRK_UP_TRG_COM_IRQHandler(void)
+{
+  HAL_TIM_IRQHandler(&htim1);
+}
+
 /* USER CODE BEGIN 1 */
 
 /* USER CODE END 1 */

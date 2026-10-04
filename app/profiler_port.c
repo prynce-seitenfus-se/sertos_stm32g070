@@ -1,34 +1,34 @@
 #include "profiler_port.h"
+
+#include "main.h"
 #include "tim.h"
 
-void profiler_port_init(void)
+void profiler_port_hardware_timer16_init(void)
 {
-	__HAL_TIM_SET_COUNTER(&htim1, 0U);
-	__HAL_TIM_SET_COUNTER(&htim3, 0U);
+    __HAL_TIM_SET_COUNTER(&htim1, 0U);
+    __HAL_TIM_SET_COUNTER(&htim3, 0U);
 
-	if ( HAL_TIM_Base_Start(&htim3) != HAL_OK ) { // slave 1st
-        Error_Handler();        
-	}
-	else if ( HAL_TIM_Base_Start(&htim1) != HAL_OK ) { // then master
-		Error_Handler();
-	}
-	else {
-        // Both timers running: TIM1 = low 16 bits, TIM3 = high 16 bits
-	}
+#if defined(PROFILER_PORT_USE_16BIT_IT)
+    /* Start TIM1 with update interrupts enabled for software overflow extension */
+    if (HAL_TIM_Base_Start_IT(&htim1) != HAL_OK) {
+        Error_Handler();
+    }
+#else
+    /* Start both cascaded timers in hardware master/slave mode */
+    if (HAL_TIM_Base_Start(&htim3) != HAL_OK) {
+        Error_Handler();
+    } else if (HAL_TIM_Base_Start(&htim1) != HAL_OK) {
+        Error_Handler();
+    }
+#endif
 }
 
-uint32_t profiler_port_ticks(void)
+uint16_t profiler_port_hardware_timer16_read_low(void)
 {
-	uint32_t hi = __HAL_TIM_GET_COUNTER(&htim3);
-	uint32_t lo = __HAL_TIM_GET_COUNTER(&htim1); // warning: interrupt may occur
-	const uint32_t hi2 = __HAL_TIM_GET_COUNTER(&htim3);
+    return (uint16_t)__HAL_TIM_GET_COUNTER(&htim1);
+}
 
-	if ( hi != hi2 )
-	{
-		/* TIM1 wrapped between the reads: re-read the low half so it belongs to hi2 */
-		lo = __HAL_TIM_GET_COUNTER(&htim1);
-		hi = hi2;
-	}
-
-	return ( hi << 16U ) | ( lo & 0xFFFFU );
+uint16_t profiler_port_hardware_timer16_read_high(void)
+{
+    return (uint16_t)__HAL_TIM_GET_COUNTER(&htim3);
 }

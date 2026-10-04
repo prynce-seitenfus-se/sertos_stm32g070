@@ -32,6 +32,7 @@
 #include "sertos_task_consumer.h"
 #include "sertos_task_profiler.h"
 #include "sertos_task_producer.h"
+#include "profiler_port.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -188,11 +189,6 @@ int main(void)
         return 0;
     }
 
-    if (!sertos_task_profiler_start_uart_receive()) {
-        Error_Handler();
-        return 0;
-    }
-
     sertos_scheduler_start();
   /* USER CODE END 2 */
 
@@ -267,6 +263,10 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   if (htim->Instance == TIM6)
   {
     HAL_IncTick();
+  }
+  else if (htim->Instance == TIM1)
+  {
+    profiler_port_16bit_it_overflow_isr();
   }
   /* USER CODE BEGIN Callback 1 */
 

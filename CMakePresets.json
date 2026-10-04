@@ -14,14 +14,25 @@
             "name": "Debug",
             "inherits": "default",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug"
+                "CMAKE_BUILD_TYPE": "Debug",
+                "PROFILER_PORT": "2x16bit"
             }
         },
         {
             "name": "Release",
             "inherits": "default",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release"
+                "CMAKE_BUILD_TYPE": "Release",
+                "PROFILER_PORT": "2x16bit"
+            }
+        },
+        {
+            "name": "Renode",
+            "inherits": "default",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "PROFILER_PORT": "16bit_it",
+                "PROFILER_TRANSPORT": "uart_stm32_hal_it"
             }
         }
     ],
@@ -33,6 +44,10 @@
         {
             "name": "Release",
             "configurePreset": "Release"
+        },
+        {
+            "name": "Renode",
+            "configurePreset": "Renode"
         }
     ]
 }

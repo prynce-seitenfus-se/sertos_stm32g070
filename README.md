@@ -68,3 +68,28 @@ This launches Renode with the STM32G0 platform description, opens a UART
 analyzer attached to USART2, and loads the built ELF. Pass `-Headless` for a
 console-only run, or `-Elf <path>` to point at a different firmware image. See
 `renode\run.ps1 -?` for all parameters.
+
+### Capturing a profiler dump over TCP
+
+For a host-accessible profiler connection, start Renode with the USART2 socket
+terminal enabled. The Renode preset selects the interrupt-driven, non-DMA UART
+backend because Renode's STM32G0 model does not complete the DMA path:
+
+```powershell
+cmake --preset Renode
+cmake --build --preset Renode
+.\renode\run.ps1 -Config Renode -ProfilerSocketPort 3456
+```
+
+In a second PowerShell terminal, request and save one complete PROF-BIN v2
+packet:
+
+```powershell
+.\renode\capture-profiler-dump.ps1 -Port 3456 -OutputFile .\renode-profiler.bin
+python ..\profiler\parse_prof_dump.py .\renode-profiler.bin --elf .\build\Renode\sertos_stm32g070.elf
+```
+
+The capture script sends `prof-dump`, skips any earlier USART2 text output,
+and saves exactly one binary packet. The default run mode continues to use the
+UART analyzer without opening a TCP port. The profiler socket terminal is
+unauthenticated; use it only on a trusted machine/network.
