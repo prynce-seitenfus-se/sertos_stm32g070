@@ -12,14 +12,16 @@
             "servertype": "stlink",
             "device": "STM32G070RB",
             "interface": "swd",
-			"serialNumber": "066FFF343339415043011534",
+            "serialNumber": "066FFF343339415043011534",
 
-            "armToolchainPath": "C:/ST/STM32CubeCLT_1.21.0/GNU-tools-for-STM32/bin",
-            "stlinkPath": "C:/ST/STM32CubeCLT_1.21.0/STLink-gdb-server/bin/ST-LINK_gdbserver.exe",
-            "stm32cubeprogrammer": "C:/ST/STM32CubeCLT_1.21.0/STM32CubeProgrammer/bin",
+            "armToolchainPath": "C:/ST/STM32CubeCLT_1.22.0/GNU-tools-for-STM32/bin",
+            "stlinkPath": "C:/ST/STM32CubeCLT_1.22.0/STLink-gdb-server/bin/ST-LINK_gdbserver.exe",
+            "stm32cubeprogrammer": "C:/ST/STM32CubeCLT_1.22.0/STM32CubeProgrammer/bin",
 
             "serverArgs": [
-                "--initialize-reset"
+                "--initialize-reset",
+                "--temp-path",
+                "C:/temp"
             ],
 
             "runToEntryPoint": "main",

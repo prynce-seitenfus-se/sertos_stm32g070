@@ -83,6 +83,14 @@ preferred tool (e.g. STM32CubeProgrammer or OpenOCD), then observe the demo over
 USART2 (PA2/PA3, 115200-8-N-1) and the green LED. PC13 toggles the paused state
 of the producer task.
 
+To open the interactive serial console CLI:
+
+```powershell
+.\serial-console.ps1
+# Or specify explicit port/logging:
+.\serial-console.ps1 -PortName COM3 -BaudRate 115200 -LogFile session.log
+```
+
 ## Running in Renode
 
 ```powershell

@@ -57,3 +57,9 @@ build/
 .history/
 log/
 *.csv
+*.bin
+*.log
+.settings/
+.clangd
+.clangd/
+.vscode/c_cpp_properties.json

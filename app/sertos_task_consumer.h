@@ -6,6 +6,6 @@
  *
  * @param param Pointer to the demo queue handle.
  */
-void sertos_task_consumer(void* param);
+__attribute__((no_instrument_function)) void sertos_task_consumer(void* param);
 
 #endif /* SERTOS_TASK_CONSUMER_H */

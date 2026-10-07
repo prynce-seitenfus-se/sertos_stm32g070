@@ -4,13 +4,13 @@
 /**
  * @brief Initializes and starts the profiler event capture.
  */
-void sertos_task_profiler_init(void);
+__attribute__((no_instrument_function)) void sertos_task_profiler_init(void);
 
 /**
  * @brief Profiler task entry point.
  *
  * @param param Unused task argument.
  */
-void sertos_task_profiler(void* param);
+__attribute__((no_instrument_function)) void sertos_task_profiler(void* param);
 
 #endif /* SERTOS_TASK_PROFILER_H */

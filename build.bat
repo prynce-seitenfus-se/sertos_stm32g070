@@ -47,9 +47,37 @@ shift
 goto :parse_args
 
 :args_done
+where arm-none-eabi-gcc.exe >nul 2>nul
+if errorlevel 1 (
+    if exist "C:\toolchains\arm\13.2.1\bin\arm-none-eabi-gcc.exe" (
+        set "PATH=C:\toolchains\arm\13.2.1\bin;%PATH%"
+    )
+)
+
+where ninja.exe >nul 2>nul
+if errorlevel 1 (
+    if exist "%LOCALAPPDATA%\Microsoft\WinGet\Packages\Ninja-build.Ninja_Microsoft.Winget.Source_8wekyb3d8bbwe\ninja.exe" (
+        set "PATH=%LOCALAPPDATA%\Microsoft\WinGet\Packages\Ninja-build.Ninja_Microsoft.Winget.Source_8wekyb3d8bbwe;%PATH%"
+    ) else if exist "%LOCALAPPDATA%\Microsoft\WindowsApps\ninja.exe" (
+        set "PATH=%LOCALAPPDATA%\Microsoft\WindowsApps;%PATH%"
+    )
+)
+
 where cmake.exe >nul 2>nul
 if errorlevel 1 (
     echo [ERROR] CMake was not found on PATH.
+    goto :build_error
+)
+
+where ninja.exe >nul 2>nul
+if errorlevel 1 (
+    echo [ERROR] Ninja was not found on PATH. Install Ninja via winget: winget install Ninja-build.Ninja
+    goto :build_error
+)
+
+where arm-none-eabi-gcc.exe >nul 2>nul
+if errorlevel 1 (
+    echo [ERROR] GNU Arm Embedded Toolchain was not found on PATH.
     goto :build_error
 )
 
