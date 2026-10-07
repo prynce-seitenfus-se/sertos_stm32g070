@@ -37,6 +37,10 @@ The demo implements a simple producer/consumer pipeline on top of SerTOS:
 - A sibling checkout of the `sertos` repository (expected at `../sertos` relative
   to this project) with the Cortex-M0+ library already built at
   `sertos/lib/arm/libsertos_cortex_m0plus.a`.
+- A sibling checkout of `profiler` at `../profiler`, including its transport-port
+  `CMakeLists.txt` and `parse_prof_dump.py`, and a sibling `hashmap` checkout at
+  `../hashmap`. The checked-in `modules/profiler` submodule revision does not
+  contain the CMake target required by this project.
 - The `modules/profiler` submodule initialized (`git submodule update --init --recursive`).
 - `arm-none-eabi-gcc`, CMake 3.22+, and Ninja.
 - Optional: [Renode](https://renode.io/) for emulated runs without hardware.
@@ -83,6 +87,15 @@ preferred tool (e.g. STM32CubeProgrammer or OpenOCD), then observe the demo over
 USART2 (PA2/PA3, 115200-8-N-1) and the green LED. PC13 toggles the paused state
 of the producer task.
 
+To program an image over ST-LINK/SWD with the installed STM32CubeProgrammer:
+
+```powershell
+.\burn.ps1 .\build\Debug\sertos_stm32g070.elf
+```
+
+The script also accepts raw `.bin` images, which it writes at flash address
+`0x08000000`.
+
 To open the interactive serial console CLI:
 
 ```powershell
@@ -104,13 +117,15 @@ console-only run, or `-Elf <path>` to point at a different firmware image. See
 
 ### Capturing a profiler dump over TCP
 
-For a host-accessible profiler connection, start Renode with the USART2 socket
-terminal enabled. The Renode preset selects the interrupt-driven, non-DMA UART
-backend because Renode's STM32G0 model does not complete the DMA path:
+For a host-accessible profiler connection, build the instrumented Renode image
+and start Renode with the USART2 socket terminal enabled. The `-i` option is
+required to record function events; without it, the dump has no application or
+SerTOS function samples. The Renode preset selects the interrupt-driven,
+non-DMA UART backend because Renode's STM32G0 model does not complete the DMA
+path:
 
 ```powershell
-cmake --preset Renode
-cmake --build --preset Renode
+.\build.bat Renode -i
 .\renode\run.ps1 -Config Renode -ProfilerSocketPort 3456
 ```
 
