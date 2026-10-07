@@ -2,14 +2,12 @@
     "cmake.sourceDirectory": "C:/github/sertos_stm32g070",
     "C_Cpp.intelliSenseEngine": "default",
     "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
-    "cmake.cmakePath": "cube-cmake",
+    "cmake.cmakePath": "C:/ST/STM32CubeCLT_1.21.0/CMake/bin/cmake.exe",
+    "cmake.useCMakePresets": "always",
     "git.detectSubmodules": true,
     "git.detectSubmodulesLimit": 50,
     "git.repositoryScanMaxDepth": 2,
     "scm.repositories.selectionMode": "multiple",
-    "cmake.configureArgs": [
-        "-DCMAKE_COMMAND=cube-cmake"
-    ],
     "cmake.preferredGenerators": [
         "Ninja"
     ]
