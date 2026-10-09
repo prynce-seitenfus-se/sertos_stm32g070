@@ -143,7 +143,7 @@ function Show-Help
     Write-Host "  /help, /?              Show this help message"
     Write-Host "  /exit, /quit, exit     Close port and exit console"
     Write-Host "  /clear, /cls           Clear console screen"
-    Write-Host "  /dump [file.bin]       Request and capture PROF-BIN v2 profiler dump"
+    Write-Host "  /dump [file.bin]       Request and capture PROF-BIN v2/v3/v4 profiler dump"
     Write-Host "  /send <hex bytes>      Send raw hex bytes (e.g. /send 70 72 6f 66)"
     Write-Host "  /info                  Show connection and port information"
     Write-Host "  <any text> + Enter     Send line with $NewLine ending"
@@ -207,12 +207,18 @@ function Capture-ProfilerDump([System.IO.Ports.SerialPort]$serialPort, [string]$
     $version = [System.BitConverter]::ToUInt16($header, 4)
     $recordCount = [System.BitConverter]::ToUInt16($header, 6)
 
-    if ($version -ne 2) {
+    if ($version -eq 2) {
+        $headerLength = 16
+    } elseif ($version -eq 3) {
+        $headerLength = 24
+    } elseif ($version -eq 4) {
+        $headerLength = 28
+    } else {
         Write-Host "[ERROR] Unsupported profiler version: $version" -ForegroundColor Red
         return
     }
 
-    $packetLength = 16 + (24 * $recordCount) + 4
+    $packetLength = $headerLength + (24 * $recordCount) + 4
     $payloadLength = $packetLength - 16
     $payload = New-Object byte[] $payloadLength
     $readPayload = 0
@@ -235,7 +241,7 @@ function Capture-ProfilerDump([System.IO.Ports.SerialPort]$serialPort, [string]$
     $packet = [byte[]]($header + $payload)
     $fullPath = Resolve-ScriptPath $outputFile
     [System.IO.File]::WriteAllBytes($fullPath, $packet)
-    Write-Host "[SUCCESS] Saved PROF-BIN v2 dump: $fullPath ($packetLength bytes, $recordCount records)" -ForegroundColor Green
+    Write-Host "[SUCCESS] Saved PROF-BIN v$version dump: $fullPath ($packetLength bytes, $recordCount records)" -ForegroundColor Green
 }
 
 try {

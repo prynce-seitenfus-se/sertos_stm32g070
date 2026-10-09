@@ -32,3 +32,8 @@ uint16_t profiler_port_hardware_timer16_read_high(void)
 {
     return (uint16_t)__HAL_TIM_GET_COUNTER(&htim3);
 }
+
+bool profiler_port_hardware_timer16_overflow_pending(void)
+{
+    return (__HAL_TIM_GET_FLAG(&htim1, TIM_FLAG_UPDATE) != RESET);
+}

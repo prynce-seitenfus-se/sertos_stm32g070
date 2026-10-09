@@ -1,0 +1,197 @@
+{
+    "schema_version": 1,
+    "description": "OTAWA static WCET targets for sertos_stm32g070 (functions from ../1.csv).",
+    "elf": "../build/Debug/sertos_stm32g070.elf",
+    "elf_checksum": "0x61c5b504",
+    "output_csv": "1w.csv",
+    "comparison_csv": "comparison.csv",
+    "captures": {
+        "target": "../1.csv",
+        "target_active": "../1a.csv",
+        "renode": "../1r.csv"
+    },
+    "work_dir": "work",
+
+    "timing": {
+        "cpu_clock_hz": 16000000,
+        "tick_hz": 1000,
+        "clock_notes": "SystemClock_Config: HSI16, PLL off, AHB/APB prescaler 1, FLASH_LATENCY_0. Profiler timer runs at PCLK1 = 16 MHz, so profiler cycles equal CPU cycles.",
+        "model": "m0plus",
+        "reduce_irreducible_loops": true,
+        "reduce_irreducible_loops_notes": "libgcc __udivsi3 (Cortex-M0+ has no hardware divider) contains an irreducible loop; OTAWA REDUCED_LOOPS_FEATURE is required to bound it.",
+        "m0plus": {
+            "mul_cycles": 1,
+            "mem_wait_states": 0,
+            "taken_branch_penalty": 1,
+            "notes": "Cortex-M0+ cycle table (Arm DDI 0484C) implemented by the m0plus/ OTAWA plugin: ALU 1, LDR/STR 2, PUSH/LDM/STM 1+N, POP 1+N (3+N with PC), B/BX/BLX 2, BL 3, B<cond> 1 (+taken_branch_penalty on taken edges), MRS/MSR/barriers 4. mul_cycles 1 assumes the fast multiplier (use 32 for the small one). mem_wait_states 0: FLASH_LATENCY_0 at 16 MHz; peripheral bus wait states are not modelled."
+        },
+        "trivial": {
+            "instruction_cycles": 2,
+            "notes": "Fixed cost per instruction. Cortex-M0+ (0 wait states) needs 1 cycle for ALU ops and 2 for loads/stores and taken branches, so 2 is the per-instruction upper estimate. 1 cycle under-estimates measured maxima (sertos_task_create_static, sertos_scheduler_init_with_config); the 'generic' model is safe but ~3.7x more pessimistic."
+        },
+        "generic": {
+            "notes": "Cortex-M0+ two-stage pipeline with 0-wait-state flash at 16 MHz.",
+            "pipeline": {
+                "model": "cortex-m0plus",
+                "fetch_queue_size": 1,
+                "alu_latency": 1,
+                "mem_latency": 2
+            },
+            "memory_banks": [
+                { "name": "FLASH",  "address": "0x08000000", "size": "0x00020000", "type": "ROM", "latency": 1, "writable": false },
+                { "name": "SRAM",   "address": "0x20000000", "size": "0x00009000", "type": "SPM", "latency": 1, "writable": true },
+                { "name": "PERIPH", "address": "0x40000000", "size": "0x20000000", "type": "IO",  "latency": 2, "writable": true }
+            ]
+        }
+    },
+
+    "instrumentation": {
+        "include_profiler_hooks": true,
+        "hooks": ["__cyg_profile_func_enter", "__cyg_profile_func_exit"],
+        "notes": "The Debug ELF is instrumented (-finstrument-functions). Profiler cycles include the hooks of nested instrumented calls, so hooks are analysed by default. Set to false to exclude them (nocall)."
+    },
+
+    "flow_facts": {
+        "multicalls": [
+            {
+                "function": "visit_list_state_nodes", "offset": "0x22", "targets": ["reset_visitor"],
+                "reason": "Only reachable from sertos_stats_reset() inside sertos_scheduler_init_with_config(), whose visitor is reset_visitor."
+            }
+        ],
+        "loops": [
+            { "function": "sertos_queue_send", "offset": "0x84", "bound": 1,
+              "reason": "Retry loop. Producer passes SERTOS_NO_WAIT, so the body returns TIMEOUT before the back edge." },
+            { "function": "sertos_queue_receive", "offset": "0x84", "bound": 1,
+              "reason": "Retry loop. Single consumer with SERTOS_WAIT_FOREVER: after wake-up data is present, so at most one re-check. Blocking time is not execution time." },
+            { "function": "sertos_scheduler_init_with_config", "offset": "0x5a", "bound": 32,
+              "reason": "linked_list_init over SERTOS_CONFIG_MAX_PRIORITIES = 32." },
+            { "function": "__udivmoddi4", "offset": "0xfc", "bound": 64,
+              "reason": "libgcc 64-bit shift/subtract division (SERTOS_MS_TO_TICKS): at most 64 iterations." },
+            { "function": "__udivsi3", "offset": "0x6c", "bound": 4,
+              "reason": "libgcc 32-bit division processes the dividend 8 bits per iteration: at most 4 iterations." },
+            { "function": "insert_wait_list_priority", "offset": "0x6a", "bound": 4,
+              "reason": "Wait list length <= number of tasks (idle, producer, consumer, profiler)." },
+            { "function": "memcpy", "offset": "0x4", "bound": 4,
+              "reason": "newlib-nano byte loop; ring buffer copies at most item_size = sizeof(SertosDemoQueueItem) = 4 bytes." },
+            { "function": "memset", "offset": "0x4", "bound": 2048,
+              "reason": "newlib-nano byte loop; largest painted task stack is SERTOS_PROF_STACK_BYTES = 2048." },
+            { "function": "bitmap_clear_all", "offset": "0x28", "bound": 1,
+              "reason": "32 priorities -> 1 bitmap word." },
+            { "function": "scan_backward", "offset": "0xc2", "bound": 1,
+              "reason": "32 priorities -> 1 bitmap word (loop over remaining words runs 0 times)." },
+            { "function": "visit_list_state_nodes", "offset": "0x2a", "bound": 1,
+              "reason": "During scheduler init only the idle task is registered." },
+            { "function": "find_frame", "offset": "0x36", "bound": 1,
+              "reason": "Calls are well nested per context (captures report 0 stale frames): the matching shadow-stack frame is on top, found in the first iteration." },
+            { "function": "pop_legacy_frame", "offset": "0x86", "bound": 1,
+              "reason": "Legacy single-stack compaction; unused once contexts are registered (switch hook), and the matching frame is on top, so no frames are shifted." },
+            { "function": "lookup_context", "offset": "0x78", "bound": 6,
+              "reason": "Context table scan <= PROFILER_CONTEXT_CAPACITY = 6 slots (cache miss)." },
+            { "function": "bind_context", "offset": "0x4e", "bound": 6,
+              "reason": "Free-slot scan <= PROFILER_CONTEXT_CAPACITY = 6 slots." },
+            { "function": "hashmap_get_ref", "offset": "0x60", "bound": 11,
+              "reason": "Linear probe length <= stored keys; the profiled run records 11 functions (1.csv)." },
+            { "function": "hashmap_insert", "offset": "0x66", "bound": 11,
+              "reason": "Linear probe length <= stored keys; the profiled run records 11 functions (1.csv)." }
+        ]
+    },
+
+    "functions": [
+        { "name": "sertos_task_create_static" },
+        { "name": "sertos_scheduler_get_tick_count" },
+        {
+            "name": "sertos_scheduler_init_with_config",
+            "loops": [
+                { "function": "memset", "offset": "0x4", "bound": 512,
+                  "reason": "Only the idle task is created: SERTOS_CONFIG_IDLE_TASK_STACK_SIZE = 512 bytes painted." }
+            ]
+        },
+        { "name": "sertos_queue_create_static" },
+        { "name": "sertos_demo_queue_init" },
+        { "name": "sertos_queue_send" },
+        { "name": "sertos_demo_queue_send" },
+        {
+            "name": "sertos_queue_receive",
+            "measured_includes_blocking": true,
+            "blocking_bound": {
+                "blocked_ticks": 10,
+                "interference": [
+                    { "function": "sertos_scheduler_delay_ms", "count": 2 },
+                    { "function": "sertos_demo_queue_send", "count": 2 },
+                    { "function": "HAL_GPIO_ReadPin", "count": 2 },
+                    { "function": "PendSV_Handler", "count": 3 }
+                ],
+                "extra_cycles": 200,
+                "reason": "Consumer (prio 2) waits forever for the producer (prio 3, delay_ms(10) period, NO_WAIT send). Next item arrives <= 10 ticks after the previous one plus the producer's release jitter (one producer job); after the send the consumer still waits for the producer to block (second job). PendSV: switch to producer, to consumer, plus one in-progress switch. extra_cycles: inline producer loop code (<= 50 instructions x 2 cycles) per job. Assumes the producer is not paused (B1 not pressed)."
+            }
+        },
+        {
+            "name": "sertos_demo_queue_receive",
+            "measured_includes_blocking": true,
+            "blocking_bound": {
+                "blocked_ticks": 10,
+                "interference": [
+                    { "function": "sertos_scheduler_delay_ms", "count": 2 },
+                    { "function": "sertos_demo_queue_send", "count": 2 },
+                    { "function": "HAL_GPIO_ReadPin", "count": 2 },
+                    { "function": "PendSV_Handler", "count": 3 }
+                ],
+                "extra_cycles": 200,
+                "reason": "Wrapper of sertos_queue_receive called by the consumer task: same blocking scenario."
+            }
+        },
+        {
+            "name": "sertos_scheduler_delay",
+            "measured_includes_blocking": true,
+            "blocking_bound": {
+                "blocked_ticks": 10,
+                "interference": [
+                    { "function": "sertos_scheduler_delay_ms", "count": 2 },
+                    { "function": "sertos_demo_queue_send", "count": 2 },
+                    { "function": "HAL_GPIO_ReadPin", "count": 2 },
+                    { "function": "sertos_demo_queue_receive", "count": 2 },
+                    { "function": "__aeabi_uidivmod", "count": 2 },
+                    { "function": "HAL_GPIO_WritePin", "count": 2 },
+                    { "function": "PendSV_Handler", "count": 6 }
+                ],
+                "extra_cycles": 400,
+                "reason": "Worst caller is the profiler task (prio 1, lowest) with delay(10); the producer calls it through delay_ms(10) and is covered by that bound. Producer and consumer (period 10 ticks) can each run one job before the wake-up tick is computed and one after the wake-up. PendSV: three switches per burst. extra_cycles: inline producer and consumer loop code (<= 50 instructions x 2 cycles) per job."
+            }
+        },
+        {
+            "name": "sertos_scheduler_delay_ms",
+            "measured_includes_blocking": true,
+            "blocking_bound": {
+                "blocked_ticks": 10,
+                "interference": [
+                    { "function": "PendSV_Handler", "count": 2 }
+                ],
+                "extra_cycles": 0,
+                "reason": "Only the producer (prio 3, highest application task) calls delay_ms(10) = SERTOS_MS_TO_TICKS(10) = 10 ticks. No task preempts it; PendSV: switch back to the producer plus one in-progress switch."
+            }
+        }
+    ],
+
+    "interference_functions": [
+        { "name": "SysTick_Handler", "period_cycles": 16000,
+          "reason": "SerTOS tick at tick_hz = 1000 (16000 cycles).",
+          "loops": [
+              { "function": "process_delayed_tasks", "offset": "0x86", "bound": 3,
+                "reason": "Delay list holds at most the three application tasks (producer, consumer, profiler); idle never delays." },
+              { "function": "sertos_timer_tick", "offset": "0x9e", "bound": 0,
+                "reason": "The application creates no software timers: the active timer list is empty." }
+          ] },
+        { "name": "TIM6_IRQHandler", "period_cycles": 16000,
+          "reason": "HAL timebase (1 kHz)." },
+        { "name": "TIM1_BRK_UP_TRG_COM_IRQHandler", "period_cycles": 65536,
+          "reason": "Profiler 16-bit timer overflow at 16 MHz (ARR = 0xFFFF)." },
+        { "name": "PendSV_Handler",
+          "reason": "Context switch (includes the profiler switch hook); counted per switch in blocking_bound.interference." },
+        { "name": "HAL_GPIO_ReadPin", "reason": "Producer loop: B1 button read." },
+        { "name": "HAL_GPIO_WritePin", "reason": "Consumer loop: LED write." },
+        { "name": "__aeabi_uidivmod", "reason": "Consumer loop: item.value % 100." }
+    ],
+    "interference_notes": "Analysed by wcet_csv.py (rows appended to 1w.csv) but not compared against captures. Entries with period_cycles are periodic ISRs used by compare_csv.py as ceil(R_post / period) + 1 activations in the response-time bound. USART2 and DMA ISRs only run while a dump command is being served and are excluded.",
+    "blocking_bound_notes": "Response-time bound for WALL-mode captures of blocking functions: R = blocked_ticks * cpu_clock_hz / tick_hz + R_post, with R_post = WCET(self) + sum(count * WCET(function)) + extra_cycles + sum over periodic ISRs of (ceil(R_post / period_cycles) + 1) * WCET(isr), iterated to a fixed point. compare_csv.py checks target WALL max <= R.",
+    "measured_includes_blocking_notes": "WALL-mode captures (PROFILER_APP_TIME_MODE=WALL, default) of these functions include the time the task is blocked (queue wait or delay). compare_csv.py checks their ACTIVE-mode maximum (--target-active, 1a.csv) against the WCET and their WALL maximum against the blocking_bound response-time bound."
+}

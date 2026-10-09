@@ -32,7 +32,9 @@
 #include "sertos_task_consumer.h"
 #include "sertos_task_profiler.h"
 #include "sertos_task_producer.h"
+#include "profiler.h"
 #include "profiler_port.h"
+#include "profiler_context_sertos.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -42,7 +44,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#if defined(SERTOS_APP_INSTRUMENTED)
+#if defined(SERTOS_APP_INSTRUMENTED) || defined(PROFILER_SCOPES_ENABLED)
 #define SERTOS_DEMO_STACK_BYTES (1024U)
 #else
 #define SERTOS_DEMO_STACK_BYTES (256U)
@@ -131,18 +133,20 @@ int main(void)
         .idle_task_stack = s_idle_task_stack,
         .idle_task_stack_size = sizeof(s_idle_task_stack),
         .tick_hook = NULL,
-        .idle_hook = NULL
+        .idle_hook = NULL,
+        .switch_hook = profiler_context_sertos_switch_hook
     };
 
     sertos_task_profiler_init();
 
-    status = sertos_scheduler_init_with_config(&sertos_cfg);
+    PROFILER_SCOPE(sertos_scheduler_init_with_config,
+                   status = sertos_scheduler_init_with_config(&sertos_cfg));
     if (status != SERTOS_STATUS_OK) {
         Error_Handler();
         return 0;
     }
 
-    status = sertos_demo_queue_init(&s_demo_queue);
+    PROFILER_SCOPE(sertos_demo_queue_init, status = sertos_demo_queue_init(&s_demo_queue));
     if (status != SERTOS_STATUS_OK) {
         Error_Handler();
         return 0;
@@ -155,9 +159,10 @@ int main(void)
     producer_config.stack_buffer = s_producer_stack;
     producer_config.stack_size = sizeof(s_producer_stack);
 
-    status = sertos_task_create_static(&producer_config,
-                                       &s_producer_tcb,
-                                       &s_producer_handle);
+    PROFILER_SCOPE(sertos_task_create_static,
+                   status = sertos_task_create_static(&producer_config,
+                                                      &s_producer_tcb,
+                                                      &s_producer_handle));
     if (status != SERTOS_STATUS_OK) {
         Error_Handler();
         return 0;
@@ -170,9 +175,10 @@ int main(void)
     consumer_config.stack_buffer = s_consumer_stack;
     consumer_config.stack_size = sizeof(s_consumer_stack);
 
-    status = sertos_task_create_static(&consumer_config,
-                                       &s_consumer_tcb,
-                                       &s_consumer_handle);
+    PROFILER_SCOPE(sertos_task_create_static,
+                   status = sertos_task_create_static(&consumer_config,
+                                                      &s_consumer_tcb,
+                                                      &s_consumer_handle));
     if (status != SERTOS_STATUS_OK) {
         Error_Handler();
         return 0;
@@ -185,9 +191,10 @@ int main(void)
     profiler_config.stack_buffer = s_profiler_stack;
     profiler_config.stack_size = sizeof(s_profiler_stack);
 
-    status = sertos_task_create_static(&profiler_config,
-                                       &s_profiler_tcb,
-                                       &s_profiler_handle);
+    PROFILER_SCOPE(sertos_task_create_static,
+                   status = sertos_task_create_static(&profiler_config,
+                                                      &s_profiler_tcb,
+                                                      &s_profiler_handle));
     if (status != SERTOS_STATUS_OK) {
         Error_Handler();
         return 0;

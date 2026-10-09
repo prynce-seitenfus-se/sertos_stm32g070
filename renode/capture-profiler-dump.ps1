@@ -87,22 +87,29 @@ try {
     $header = [byte[]](@(0x50, 0x52, 0x4F, 0x46) + $headerTail)
     $version = [System.BitConverter]::ToUInt16($header, 4)
     $recordCount = [System.BitConverter]::ToUInt16($header, 6)
-    if (($version -ne 2) -or ($recordCount -gt 64)) {
+    $headerLength = switch ($version) { 2 { 16 } 3 { 24 } 4 { 28 } default { 0 } }
+    if (($headerLength -eq 0) -or ($recordCount -gt 64)) {
         throw "Invalid profiler header (version $version, records $recordCount)."
     }
 
-    $packetLength = 16 + (24 * $recordCount) + 4
+    $packetLength = $headerLength + (24 * $recordCount) + 4
     $packetTail = Read-ExactBytes -NetworkStream $networkStream -Length ($packetLength - 16)
     $packet = [byte[]]($header + $packetTail)
 
-    $fullOutputPath = [System.IO.Path]::GetFullPath($OutputFile)
+    if ([System.IO.Path]::IsPathRooted($OutputFile)) {
+        $fullOutputPath = $OutputFile
+    } else {
+        $fullOutputPath = [System.IO.Path]::GetFullPath(
+            (Join-Path -Path (Get-Location).ProviderPath -ChildPath $OutputFile)
+        )
+    }
     $outputDirectory = [System.IO.Path]::GetDirectoryName($fullOutputPath)
     if (-not [System.IO.Directory]::Exists($outputDirectory)) {
         [void][System.IO.Directory]::CreateDirectory($outputDirectory)
     }
     [System.IO.File]::WriteAllBytes($fullOutputPath, $packet)
 
-    Write-Host "Saved PROF-BIN v2 dump: $fullOutputPath"
+    Write-Host "Saved PROF-BIN v$version dump: $fullOutputPath"
     Write-Host "Records: $recordCount; bytes: $packetLength"
 }
 finally {

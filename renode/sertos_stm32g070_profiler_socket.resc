@@ -9,6 +9,7 @@ machine LoadPlatformDescription @platforms/cpus/stm32g0.repl
 timer1 Frequency 16000000
 timer6 Frequency 16000000
 nvic Frequency 16000000
+cpu PerformanceInMips 16
 
 emulation CreateServerSocketTerminal $profilerPort "profilerUart" false
 connector Connect sysbus.usart2 profilerUart

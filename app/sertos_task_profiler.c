@@ -11,15 +11,29 @@
 #include "usart.h"
 
 #define PROFILER_MAP_CAPACITY     (64U)
-#define PROFILER_STACK_DEPTH      (32U)
+#define PROFILER_STACK_DEPTH      (16U)
+#define PROFILER_CONTEXT_CAPACITY (6U)
 #define PROFILER_TX_BUFFER_SIZE   (256U)
 #define PROFILER_RX_BUFFER_SIZE   (32U)
 #define PROFILER_TX_TIMEOUT_MS    (1000U)
 #define PROFILER_DUMP_COMMAND     "prof-dump"
 
+/* Select PROFILER_TIME_ACTIVE (1) to exclude preempted/blocked time */
+#ifndef PROFILER_APP_TIME_MODE
+#define PROFILER_APP_TIME_MODE    (0)
+#endif
+
+#if (PROFILER_APP_TIME_MODE == 1)
+#define PROFILER_APP_TIME_MODE_VALUE PROFILER_TIME_ACTIVE
+#else
+#define PROFILER_APP_TIME_MODE_VALUE PROFILER_TIME_WALL
+#endif
+
 static HashMapEntry s_profiler_map[PROFILER_MAP_CAPACITY];
 static ProfilerMetric s_profiler_metrics[PROFILER_MAP_CAPACITY];
-static ProfilerStackFrame s_profiler_stack[PROFILER_STACK_DEPTH];
+/* One shadow stack per context: pre-scheduler, idle, producer, consumer, profiler, ISR */
+static ProfilerStackFrame s_profiler_stack[PROFILER_CONTEXT_CAPACITY * PROFILER_STACK_DEPTH];
+static ProfilerContext s_profiler_contexts[PROFILER_CONTEXT_CAPACITY];
 static uint8_t s_profiler_tx_buffer[PROFILER_TX_BUFFER_SIZE] __attribute__((aligned(32)));
 static uint8_t s_profiler_rx_buffer[PROFILER_RX_BUFFER_SIZE] __attribute__((aligned(32)));
 
@@ -37,7 +51,10 @@ void sertos_task_profiler_init(void)
         .metrics = s_profiler_metrics,
         .metrics_capacity = PROFILER_MAP_CAPACITY,
         .stack_frames = s_profiler_stack,
-        .stack_depth = PROFILER_STACK_DEPTH
+        .stack_depth = PROFILER_STACK_DEPTH,
+        .contexts = s_profiler_contexts,
+        .context_capacity = PROFILER_CONTEXT_CAPACITY,
+        .time_mode = PROFILER_APP_TIME_MODE_VALUE
     };
     ProfilerTransportConfig transport_config = {
         .device = &huart2,
@@ -88,7 +105,7 @@ void sertos_task_profiler(void* param)
             }
         }
 
-        (void)sertos_scheduler_delay(10U);
+        PROFILER_SCOPE(sertos_scheduler_delay, (void)sertos_scheduler_delay(10U));
     }
 }
 
@@ -148,7 +165,10 @@ static bool profiler_dump_metrics(void)
 
 static uint32_t profiler_tick_ms(void)
 {
-    return (uint32_t)sertos_scheduler_get_tick_count();
+    SertosTick tick;
+
+    PROFILER_SCOPE(sertos_scheduler_get_tick_count, tick = sertos_scheduler_get_tick_count());
+    return (uint32_t)tick;
 }
 
 static void profiler_yield_ms(uint32_t milliseconds)

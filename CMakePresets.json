@@ -15,7 +15,7 @@
             "inherits": "default",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "PROFILER_PORT": "2x16bit"
+                "PROFILER_PORT": "16bit_it"
             }
         },
         {
@@ -34,6 +34,22 @@
                 "PROFILER_PORT": "16bit_it",
                 "PROFILER_TRANSPORT": "uart_stm32_hal_it"
             }
+        },
+        {
+            "name": "Measure",
+            "inherits": "Debug",
+            "cacheVariables": {
+                "SERTOS_APP_INSTRUMENTED": "OFF",
+                "PROFILER_APP_SCOPES": "ON"
+            }
+        },
+        {
+            "name": "RenodeMeasure",
+            "inherits": "Renode",
+            "cacheVariables": {
+                "SERTOS_APP_INSTRUMENTED": "OFF",
+                "PROFILER_APP_SCOPES": "ON"
+            }
         }
     ],
     "buildPresets": [
@@ -48,6 +64,14 @@
         {
             "name": "Renode",
             "configurePreset": "Renode"
+        },
+        {
+            "name": "Measure",
+            "configurePreset": "Measure"
+        },
+        {
+            "name": "RenodeMeasure",
+            "configurePreset": "RenodeMeasure"
         }
     ]
 }

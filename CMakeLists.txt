@@ -28,6 +28,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 project(${CMAKE_PROJECT_NAME})
 message("Build type: " ${CMAKE_BUILD_TYPE})
 option(SERTOS_APP_INSTRUMENTED "Instrument selected application files" OFF)
+option(PROFILER_APP_SCOPES "Measure selected call sites with explicit profiler scopes (no instrumentation)" OFF)
+if(SERTOS_APP_INSTRUMENTED AND PROFILER_APP_SCOPES)
+    message(FATAL_ERROR "SERTOS_APP_INSTRUMENTED and PROFILER_APP_SCOPES are mutually exclusive")
+endif()
 
 # Enable CMake support for ASM and C languages
 enable_language(C ASM)
@@ -99,6 +103,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/app/sertos_demo_queue.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/app/profiler_port.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/profiler_context_sertos.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/app/sertos_port.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/app/sertos_task_producer.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/app/sertos_task_consumer.c"
@@ -138,6 +143,22 @@ target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE
     "$<$<COMPILE_LANGUAGE:C>:-fopt-info-inline-missed>"
 )
 
+# Profiler duration semantics: WALL (inclusive of preemption) or ACTIVE (CPU time only).
+set(PROFILER_APP_TIME_MODE "WALL" CACHE STRING "Profiler time mode (WALL or ACTIVE)")
+set_property(CACHE PROFILER_APP_TIME_MODE PROPERTY STRINGS WALL ACTIVE)
+if(PROFILER_APP_TIME_MODE STREQUAL "ACTIVE")
+    target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE PROFILER_APP_TIME_MODE=1)
+elseif(PROFILER_APP_TIME_MODE STREQUAL "WALL")
+    target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE PROFILER_APP_TIME_MODE=0)
+else()
+    message(FATAL_ERROR "PROFILER_APP_TIME_MODE must be WALL or ACTIVE")
+endif()
+
+# Explicit call-site scopes: uninstrumented code, same binary as the WCET analysis.
+if(PROFILER_APP_SCOPES)
+    target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE PROFILER_SCOPES_ENABLED)
+endif()
+
 # Instrument application files for function call tracing.
 if(SERTOS_APP_INSTRUMENTED)
     target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE SERTOS_APP_INSTRUMENTED)
@@ -153,5 +174,6 @@ endif()
 # Keep profiler callbacks out of instrumentation to prevent recursive hook calls.
 set_source_files_properties(
     "${CMAKE_CURRENT_SOURCE_DIR}/app/profiler_port.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/app/profiler_context_sertos.c"
     PROPERTIES COMPILE_OPTIONS "-fno-instrument-functions"
 )
